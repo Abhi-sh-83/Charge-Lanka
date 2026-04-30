@@ -1,0 +1,276 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+// ──────────────── USER & AUTH ────────────────
+
+model User {
+  id          String   @id @default(uuid())
+  firebaseUid String   @unique @map("firebase_uid")
+  email       String   @unique
+  phone       String?  @unique
+  fullName    String   @map("full_name")
+  avatarUrl   String?  @map("avatar_url")
+  role        UserRole @default(USER)
+  isVerified  Boolean  @default(false) @map("is_verified")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  wallet              Wallet?
+  chargerListings     ChargerListing[]
+  bookingsAsUser      Booking[]            @relation("UserBookings")
+  chargingSessions    ChargingSession[]
+  reviewsGiven        Review[]             @relation("ReviewAuthor")
+  reviewsReceived     Review[]             @relation("ReviewTarget")
+  notifications       Notification[]
+  paymentTransactions PaymentTransaction[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  HOST
+  ADMIN
+}
+
+// ──────────────── WALLET ────────────────
+
+model Wallet {
+  id        String   @id @default(uuid())
+  userId    String   @unique @map("user_id")
+  balance   Decimal  @default(0) @db.Decimal(12, 2)
+  currency  String   @default("LKR")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user         User                 @relation(fields: [userId], references: [id])
+  transactions PaymentTransaction[]
+
+  @@map("wallets")
+}
+
+// ──────────────── CHARGER LISTING ────────────────
+
+model ChargerListing {
+  id            String                                   @id @default(uuid())
+  hostId        String                                   @map("host_id")
+  title         String
+  description   String?
+  connectorType ConnectorType                            @map("connector_type")
+  powerOutputKw Float                                    @map("power_output_kw")
+  address       String
+  city          String
+  province      String
+  location      Unsupported("geometry(Point, 4326)")
+  photos        String[]
+  amenities     String[]
+  isActive      Boolean                                  @default(true) @map("is_active")
+  qrCodeToken   String                                   @unique @map("qr_code_token")
+  avgRating     Float                                    @default(0) @map("avg_rating")
+  totalReviews  Int                                      @default(0) @map("total_reviews")
+  createdAt     DateTime                                 @default(now()) @map("created_at")
+  updatedAt     DateTime                                 @updatedAt @map("updated_at")
+
+  host             User              @relation(fields: [hostId], references: [id])
+  chargingPackages ChargingPackage[]
+  bookings         Booking[]
+  reviews          Review[]
+  availability     Availability[]
+
+  @@index([location], name: "charger_location_idx", type: Gist)
+  @@map("charger_listings")
+}
+
+enum ConnectorType {
+  TYPE_1
+  TYPE_2
+  CCS
+  CHADEMO
+  TESLA
+  UNIVERSAL
+}
+
+// ──────────────── CHARGING PACKAGES ────────────────
+
+model ChargingPackage {
+  id              String      @id @default(uuid())
+  listingId       String      @map("listing_id")
+  name            String
+  tier            PackageTier
+  pricePerKwh     Decimal     @map("price_per_kwh") @db.Decimal(8, 2)
+  sessionFee      Decimal     @default(0) @map("session_fee") @db.Decimal(8, 2)
+  maxDurationMins Int?        @map("max_duration_mins")
+  description     String?
+  isActive        Boolean     @default(true) @map("is_active")
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  listing  ChargerListing @relation(fields: [listingId], references: [id])
+  bookings Booking[]
+
+  @@map("charging_packages")
+}
+
+enum PackageTier {
+  STANDARD  // Normal rate
+  EXPRESS   // Premium fast-charge rate
+  OVERNIGHT // Discounted long-duration rate
+}
+
+// ──────────────── AVAILABILITY ────────────────
+
+model Availability {
+  id        String @id @default(uuid())
+  listingId String @map("listing_id")
+  dayOfWeek Int    @map("day_of_week") // 0 = Sunday, 6 = Saturday
+  startTime String @map("start_time")  // "08:00"
+  endTime   String @map("end_time")    // "22:00"
+
+  listing ChargerListing @relation(fields: [listingId], references: [id])
+
+  @@unique([listingId, dayOfWeek])
+  @@map("availability")
+}
+
+// ──────────────── BOOKING ────────────────
+
+model Booking {
+  id             String        @id @default(uuid())
+  userId         String        @map("user_id")
+  listingId      String        @map("listing_id")
+  packageId      String        @map("package_id")
+  status         BookingStatus @default(PENDING)
+  scheduledStart DateTime      @map("scheduled_start")
+  scheduledEnd   DateTime      @map("scheduled_end")
+  totalEstimate  Decimal       @map("total_estimate") @db.Decimal(10, 2)
+  platformFee    Decimal       @map("platform_fee") @db.Decimal(10, 2)
+  hostPayout     Decimal       @map("host_payout") @db.Decimal(10, 2)
+  qrVerified     Boolean       @default(false) @map("qr_verified")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  user            User                @relation("UserBookings", fields: [userId], references: [id])
+  listing         ChargerListing      @relation(fields: [listingId], references: [id])
+  package         ChargingPackage     @relation(fields: [packageId], references: [id])
+  chargingSession ChargingSession?
+  payment         PaymentTransaction?
+
+  @@map("bookings")
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+// ──────────────── CHARGING SESSION ────────────────
+
+model ChargingSession {
+  id                 String        @id @default(uuid())
+  bookingId          String        @unique @map("booking_id")
+  userId             String        @map("user_id")
+  status             SessionStatus @default(INITIALIZING)
+  startedAt          DateTime?     @map("started_at")
+  endedAt            DateTime?     @map("ended_at")
+  energyDeliveredKwh Decimal       @default(0) @map("energy_delivered_kwh") @db.Decimal(8, 3)
+  currentPowerKw     Float         @default(0) @map("current_power_kw")
+  batteryStartPct    Float?        @map("battery_start_pct")
+  batteryEndPct      Float?        @map("battery_end_pct")
+  costAccrued        Decimal       @default(0) @map("cost_accrued") @db.Decimal(10, 2)
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("charging_sessions")
+}
+
+enum SessionStatus {
+  INITIALIZING
+  CHARGING
+  PAUSED
+  COMPLETED
+  FAULTED
+}
+
+// ──────────────── PAYMENTS ────────────────
+
+model PaymentTransaction {
+  id          String          @id @default(uuid())
+  walletId    String          @map("wallet_id")
+  userId      String          @map("user_id")
+  bookingId   String?         @unique @map("booking_id")
+  type        TransactionType
+  amount      Decimal         @db.Decimal(10, 2)
+  platformFee Decimal         @default(0) @map("platform_fee") @db.Decimal(10, 2)
+  status      PaymentStatus   @default(PENDING)
+  description String?
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  wallet  Wallet   @relation(fields: [walletId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+  booking Booking? @relation(fields: [bookingId], references: [id])
+
+  @@map("payment_transactions")
+}
+
+enum TransactionType {
+  TOP_UP
+  CHARGE_PAYMENT
+  HOST_PAYOUT
+  REFUND
+  COMMISSION
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+// ──────────────── REVIEWS ────────────────
+
+model Review {
+  id        String   @id @default(uuid())
+  authorId  String   @map("author_id")
+  targetId  String   @map("target_id")
+  listingId String   @map("listing_id")
+  rating    Int      // 1–5
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  author  User           @relation("ReviewAuthor", fields: [authorId], references: [id])
+  target  User           @relation("ReviewTarget", fields: [targetId], references: [id])
+  listing ChargerListing @relation(fields: [listingId], references: [id])
+
+  @@unique([authorId, listingId])
+  @@map("reviews")
+}
+
+// ──────────────── NOTIFICATIONS ────────────────
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  title     String
+  body      String
+  type      String
+  data      Json?
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}

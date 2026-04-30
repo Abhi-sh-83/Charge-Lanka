@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "871889871600",
+    "firebase_url": "https://chargelanka-app-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "chargelanka-app",
+    "storage_bucket": "chargelanka-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:871889871600:android:64bc5be0addc5722341835",
+        "android_client_info": {
+          "package_name": "com.voltshare.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhAXQBgLKm_4l81_bkvl7oafmqVjBHKm0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
